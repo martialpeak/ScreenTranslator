@@ -220,7 +220,7 @@ class TranslationRepository(
                         val block = blocks[origIdx]
                         val normalized = normalizedTexts[origIdx] ?: ""
                         // اگر مدل تعداد کمتری خروجی برگرداند، به‌جای کرش، همان مورد با فال‌بک ترجمه می‌شود
-                        val batchText = batchTranslations.getOrNull(batchIdx)
+                        val batchText = batchTranslations[batchIdx]
                         val finalTrans = if (!batchText.isNullOrBlank()) {
                             val colloquial = com.screenreader.translator.engine.translation.ColloquialTransformer.makeConversational(batchText)
 
