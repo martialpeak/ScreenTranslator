@@ -26,6 +26,7 @@ import androidx.core.app.NotificationCompat
 import com.screenreader.translator.MainActivity
 import com.screenreader.translator.R
 import com.screenreader.translator.ScreenTranslatorApp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -253,50 +254,64 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    /**
+     * اسکن اولیه: یک کپی مستقل از صفحه گرفته می‌شود و همان کپی هم برای OCR و هم برای
+     * Vision (sourceBitmap) استفاده می‌شود. قبلاً bitmap ارسالی به Vision توسط فراخوانی بعدی
+     * کپچر recycle می‌شد و باعث کرش یا تصویر خراب می‌شد.
+     */
     private suspend fun performInitialAutoScan() {
         val capture = screenCaptureService ?: return
         if (!capture.isReady()) return
 
+        var snapshot: Bitmap? = null
         try {
-            withContext(Dispatchers.Main) {
-                overlayLayoutManager?.hideOverlay()
-                bubbleRootView?.visibility = View.INVISIBLE
-            }
+            overlayLayoutManager?.hideOverlay()
+            bubbleRootView?.visibility = View.INVISIBLE
             delay(120)
 
-            val latestBitmap = capture.getLatestScreenBitmap()
-            val blocks = capture.captureAndScanScreen()
+            snapshot = capture.snapshotScreenBitmap(waitAttempts = 10)
+            bubbleRootView?.visibility = View.VISIBLE
+            val shot = snapshot ?: return
 
-            withContext(Dispatchers.Main) {
-                bubbleRootView?.visibility = View.VISIBLE
-                if (blocks.isNotEmpty()) {
-                    val translated = ScreenTranslatorApp.repository.translateBlocks(blocks, sourceBitmap = latestBitmap)
-                    overlayLayoutManager?.showTranslations(translated, isAutoScroll = true)
-                }
+            val blocks = capture.scanScreenBitmap(shot)
+            if (blocks.isNotEmpty()) {
+                val translated = ScreenTranslatorApp.repository.translateBlocks(blocks, sourceBitmap = shot)
+                overlayLayoutManager?.showTranslations(translated, isAutoScroll = true)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            withContext(Dispatchers.Main) {
-                bubbleRootView?.visibility = View.VISIBLE
-            }
+            e.printStackTrace()
+        } finally {
+            bubbleRootView?.visibility = View.VISIBLE
+            snapshot?.recycle()
         }
     }
 
+    /**
+     * حلقه پایش اسکرول: نمونه‌برداری مستقیم از بافر قابل استفاده مجدد (بدون ساخت Bitmap در هر سیکل)
+     * و فقط هنگام توقف روی پنل جدید یک کپی کامل برای OCR گرفته می‌شود. OCR خارج از ترد اصلی اجرا می‌شود.
+     */
     private suspend fun runAutoScrollWatcher() {
         val capture = screenCaptureService ?: return
-        var sampleBufferA = IntArray(120)
-        var sampleBufferB = IntArray(120)
+        val sampleBufferA = IntArray(120)
+        val sampleBufferB = IntArray(120)
         var useBufferA = true
         var lastFrameSamples: IntArray? = null
         var lastCleanTranslatedSamples: IntArray? = null
         var stationaryStreak = 0
         var isOverlayShowing = false
 
+        fun nextBuffer(): IntArray {
+            val buffer = if (useBufferA) sampleBufferA else sampleBufferB
+            useBufferA = !useBufferA
+            return buffer
+        }
+
         // مکث اولیه جهت ثبات نمایشگر پس از اسکن آغازین
         delay(350)
-        capture.getLatestScreenBitmap()?.let {
-            val samples = capture.extractScreenSamples(it, sampleBufferA)
+        capture.sampleScreen(nextBuffer())?.let { samples ->
             lastFrameSamples = samples
-            useBufferA = false
             if (overlayLayoutManager?.hasActiveOverlay() == true) {
                 isOverlayShowing = true
                 lastCleanTranslatedSamples = samples.clone()
@@ -307,80 +322,50 @@ class FloatingBubbleService : Service() {
             delay(250)
             if (!capture.isReady()) continue
 
-            val bitmap = capture.getLatestScreenBitmap() ?: continue
-            val currentTargetBuffer = if (useBufferA) sampleBufferA else sampleBufferB
-            val currentSamples = capture.extractScreenSamples(bitmap, currentTargetBuffer)
-            useBufferA = !useBufferA
+            val currentSamples = capture.sampleScreen(nextBuffer()) ?: continue
+            val frameDiff = capture.computeSamplesDiffPercentage(currentSamples, lastFrameSamples)
+            lastFrameSamples = currentSamples
 
             if (isOverlayShowing) {
-                // لایه ترجمه در حال نمایش است -> بررسی آیا کاربر شروع به اسکرول کرده است؟
-                val scrollDiff = capture.computeSamplesDiffPercentage(currentSamples, lastFrameSamples)
-                lastFrameSamples = currentSamples
-
-                if (scrollDiff > 15f) {
-                    // حرکت و اسکرول صفحه تشخیص داده شد (> 15% اختلاف نوری محسوس)
-                    // پنهان‌سازی فوری لایه ترجمه تا مانع مطالعه و اسکرول روان نشود
+                // لایه ترجمه در حال نمایش است -> اگر کاربر شروع به اسکرول کرد (> 15%) پنهانش کن
+                if (frameDiff > 15f) {
                     isOverlayShowing = false
                     stationaryStreak = 0
-                    withContext(Dispatchers.Main) {
-                        overlayLayoutManager?.hideOverlay()
-                    }
-                } else {
-                    // کاربر در حال خواندن پنل جاری است و صفحه ساکن است -> هیچ کاری نکن!
-                    // پنجره صددرصد پایدار و بدون پرش و بدون ترجمه تکراری باقی می‌ماند
+                    overlayLayoutManager?.hideOverlay()
                 }
-            } else {
-                // لایه مخفی است و کاربر در حال اسکرول یا توقف روی پنل جدید است
-                val frameDiff = capture.computeSamplesDiffPercentage(currentSamples, lastFrameSamples)
-                lastFrameSamples = currentSamples
+                continue
+            }
 
-                if (frameDiff < 12f) {
-                    // صفحه در این بازه ۲۵۰ میلی‌ثانیه‌ای کاملاً بی‌حرکت بوده است
-                    stationaryStreak++
-                } else {
-                    // صفحه هنوز در حال حرکت و اسکرول است
-                    stationaryStreak = 0
+            // لایه مخفی است: شمارش سیکل‌های ساکن
+            stationaryStreak = if (frameDiff < 12f) stationaryStreak + 1 else 0
+            if (stationaryStreak < 2) continue
+            stationaryStreak = 0
+
+            // آیا پنل جدید است یا همان پنل قبلی؟
+            val panelDiff = capture.computeSamplesDiffPercentage(currentSamples, lastCleanTranslatedSamples)
+            if (lastCleanTranslatedSamples != null && panelDiff <= 18f) continue
+
+            val snapshot = capture.snapshotScreenBitmap() ?: continue
+            try {
+                val blocks = capture.scanScreenBitmap(snapshot)
+                lastCleanTranslatedSamples = currentSamples.clone()
+
+                if (blocks.isNotEmpty()) {
+                    val translated = ScreenTranslatorApp.repository.translateBlocks(blocks, sourceBitmap = snapshot)
+                    if (!isAutoScrollActive) break
+                    overlayLayoutManager?.showTranslations(translated, isAutoScroll = true)
+                    isOverlayShowing = true
+
+                    // مکث کوتاه جهت تکمیل رندر لایه و به‌روزرسانی نمونه با لایه جدید
+                    delay(300)
+                    capture.sampleScreen(nextBuffer())?.let { lastFrameSamples = it }
                 }
-
-                // اگر صفحه حداقل ۲ سیکل متوالی (~۵۰۰ میلی‌ثانیه) کاملاً متوقف ماند:
-                if (stationaryStreak >= 2) {
-                    // بررسی اینکه آیا این پنل جدید است یا همان پنل قبلی؟
-                    val panelDiff = capture.computeSamplesDiffPercentage(currentSamples, lastCleanTranslatedSamples)
-
-                    if (panelDiff > 18f || lastCleanTranslatedSamples == null) {
-                        // پنل جدید مانهوا!
-                        // چون لایه ترجمه حین اسکرول مخفی بوده، فریم صفحه کاملاً تمیز است
-                        val scanCopy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                        val preferences = com.screenreader.translator.data.local.AppPreferences.getInstance(applicationContext)
-                        val blocks = capture.getOcrScanner().scanBitmap(scanCopy, filterSystemMargins = true, ocrLanguageMode = preferences.ocrLanguageMode)
-                        scanCopy.recycle()
-
-                        if (blocks.isNotEmpty()) {
-                            val translated = ScreenTranslatorApp.repository.translateBlocks(blocks, sourceBitmap = bitmap)
-                            withContext(Dispatchers.Main) {
-                                overlayLayoutManager?.showTranslations(translated, isAutoScroll = true)
-                            }
-                            lastCleanTranslatedSamples = currentSamples.clone()
-                            isOverlayShowing = true
-                            stationaryStreak = 0
-
-                            // مکث کوتاه جهت تکمیل رندر لایه و به‌روزرسانی نمونه با لایه جدید
-                            delay(300)
-                            capture.getLatestScreenBitmap()?.let { freshWithOverlay ->
-                                val overlayTarget = if (useBufferA) sampleBufferA else sampleBufferB
-                                lastFrameSamples = capture.extractScreenSamples(freshWithOverlay, overlayTarget)
-                                useBufferA = !useBufferA
-                            }
-                        } else {
-                            // در این پنل متنی یافت نشد (مثلاً فقط تصویر یا صحنه اکشن بدون دیالوگ)
-                            lastCleanTranslatedSamples = currentSamples.clone()
-                            stationaryStreak = 0
-                        }
-                    } else {
-                        // روی همان پنل قبلی هستیم؛ نیازی به ترجمه مجدد نیست
-                        stationaryStreak = 0
-                    }
-                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                snapshot.recycle()
             }
         }
     }
@@ -430,6 +415,8 @@ class FloatingBubbleService : Service() {
                     overlayLayoutManager?.showTranslations(translatedBlocks)
                 }
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
@@ -437,9 +424,8 @@ class FloatingBubbleService : Service() {
                     overlayLayoutManager?.setOverlayVisibility(true)
                 }
             } finally {
-                withContext(Dispatchers.Main) {
-                    resetLoadingState()
-                }
+                bubbleRootView?.visibility = View.VISIBLE
+                resetLoadingState()
             }
         }
     }
@@ -458,13 +444,25 @@ class FloatingBubbleService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         isRunning = false
+        isAutoScrollActive = false
         serviceScope.cancel()
 
         if (isBoundToCapture) {
-            unbindService(captureServiceConnection)
+            try {
+                unbindService(captureServiceConnection)
+            } catch (_: Exception) {
+            }
             isBoundToCapture = false
+        }
+
+        // توقف سرویس کپچر همراه با حباب تا MediaProjection و اعلانش بی‌دلیل زنده نمانند
+        try {
+            startService(Intent(this, ScreenCaptureService::class.java).apply {
+                action = ScreenCaptureService.ACTION_STOP_PROJECTION
+            })
+        } catch (_: Exception) {
+            stopService(Intent(this, ScreenCaptureService::class.java))
         }
 
         bubbleRootView?.let {
@@ -476,11 +474,13 @@ class FloatingBubbleService : Service() {
         }
 
         overlayLayoutManager?.release()
+        super.onDestroy()
     }
 
     companion object {
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP_SERVICE = "com.screenreader.translator.action.STOP_BUBBLE_SERVICE"
+        @Volatile
         var isRunning: Boolean = false
     }
 }

@@ -51,15 +51,24 @@ class OfflineMlKitTranslator {
     }
 
     /**
-     * ترجمه کاملاً آفلاین و بلادرنگ با هوش مصنوعی محلی دستگاه
+     * ترجمه کاملاً آفلاین و بلادرنگ با هوش مصنوعی محلی دستگاه.
+     * این مترجم فقط مبدأ انگلیسی دارد؛ متون کره‌ای/چینی/ژاپنی را رد می‌کند تا
+     * به‌جای خروجی بی‌معنی، مخزن ترجمه به موتور آنلاین (تشخیص خودکار زبان) سوییچ کند.
      */
     suspend fun translate(text: String): String {
-        return try {
-            translator.translate(text).await()
-        } catch (e: Exception) {
-            // در صورت عدم وجود مدل یا خطا
-            throw e
+        if (containsCjk(text)) {
+            throw UnsupportedOperationException("Offline translator only supports English source text")
         }
+        return translator.translate(text).await()
+    }
+
+    private fun containsCjk(text: String): Boolean = text.any { c ->
+        c in '\u1100'..'\u11FF' ||   // Hangul Jamo
+            c in '\u3040'..'\u30FF' || // Hiragana + Katakana
+            c in '\u3130'..'\u318F' || // Hangul Compatibility Jamo
+            c in '\u3400'..'\u4DBF' || // CJK Extension A
+            c in '\u4E00'..'\u9FFF' || // CJK Unified Ideographs
+            c in '\uAC00'..'\uD7AF'    // Hangul Syllables
     }
 
     fun close() {

@@ -7,7 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
@@ -16,14 +20,16 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.DisplayMetrics
-import android.util.Log
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.screenreader.translator.MainActivity
 import com.screenreader.translator.R
 import com.screenreader.translator.ScreenTranslatorApp
+import com.screenreader.translator.data.local.AppPreferences
 import com.screenreader.translator.engine.ocr.RecognizedBlock
 import com.screenreader.translator.engine.ocr.ScreenOcrScanner
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +37,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class ScreenCaptureService : Service() {
@@ -39,16 +47,25 @@ class ScreenCaptureService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val ocrScanner = ScreenOcrScanner()
 
+    @Volatile
     private var mediaProjection: MediaProjection? = null
+    @Volatile
     private var virtualDisplay: VirtualDisplay? = null
+    @Volatile
     private var imageReader: ImageReader? = null
 
     private var screenWidth = 1080
     private var screenHeight = 2400
     private var screenDensity = 420
 
-    @Volatile
-    private var cachedLatestBitmap: Bitmap? = null
+    // بافرهای قابل استفاده مجدد فریم: به‌جای ساخت و recycle یک Bitmap فول‌اسکرین (~10MB)
+    // در هر ۲۵۰ میلی‌ثانیه، همیشه در همین دو بافر نوشته می‌شود. دسترسی فقط داخل frameMutex.
+    private val frameMutex = Mutex()
+    private var frameBitmap: Bitmap? = null
+    private var frameCanvas: Canvas? = null
+    private var stagingBitmap: Bitmap? = null
+    private var hasFrame = false
+    private val copyPaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC) }
 
     inner class LocalBinder : Binder() {
         fun getService(): ScreenCaptureService = this@ScreenCaptureService
@@ -62,39 +79,56 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent != null && intent.action == ACTION_START_PROJECTION) {
-            val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
-            val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(EXTRA_RESULT_DATA)
-            }
-
-            if (resultCode != 0 && resultData != null) {
-                startForegroundNotification()
-                val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                mediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
-
-                // الزام حیاتی اندروید ۱۴+: ثبت کال‌بک قبل از فراخوانی createVirtualDisplay
-                mediaProjection?.registerCallback(object : MediaProjection.Callback() {
-                    override fun onStop() {
-                        super.onStop()
-                        virtualDisplay?.release()
-                        virtualDisplay = null
-                        imageReader?.close()
-                        imageReader = null
-                        cachedLatestBitmap?.recycle()
-                        cachedLatestBitmap = null
-                        isProjectionReady = false
-                    }
-                }, android.os.Handler(android.os.Looper.getMainLooper()))
-
-                setupVirtualDisplay()
-                isProjectionReady = true
+        when (intent?.action) {
+            ACTION_START_PROJECTION -> startProjection(intent)
+            ACTION_STOP_PROJECTION -> {
+                releaseProjection()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
         }
-        return START_STICKY
+        // توکن MediaProjection قابل استفاده مجدد نیست؛ ری‌استارت خودکار سرویس بدون توکن بی‌فایده است.
+        return START_NOT_STICKY
+    }
+
+    private fun startProjection(intent: Intent) {
+        val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+        val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(EXTRA_RESULT_DATA)
+        }
+        if (resultCode == 0 || resultData == null) return
+
+        // الزام اندروید ۱۴+: سرویس باید قبل از getMediaProjection در حالت foreground باشد
+        startForegroundNotification()
+
+        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val projection = try {
+            projectionManager.getMediaProjection(resultCode, resultData)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } ?: return
+
+        // آزادسازی پروجکشن قبلی (در صورت وجود) قبل از جایگزینی
+        releaseProjection()
+        mediaProjection = projection
+
+        // الزام اندروید ۱۴+: ثبت کال‌بک قبل از فراخوانی createVirtualDisplay
+        projection.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                // فقط اگر هنوز همین پروجکشن فعال است پاکسازی شود (نه پروجکشن جدیدتر)
+                if (mediaProjection === projection) {
+                    mediaProjection = null
+                    releaseCaptureSurfaces()
+                }
+            }
+        }, Handler(Looper.getMainLooper()))
+
+        setupVirtualDisplay()
+        isProjectionReady = virtualDisplay != null
     }
 
     private fun startForegroundNotification() {
@@ -145,19 +179,49 @@ class ScreenCaptureService : Service() {
             imageReader?.close()
             virtualDisplay?.release()
 
-            imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+            val reader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+            imageReader = reader
             virtualDisplay = proj.createVirtualDisplay(
                 "ScreenTranslatorCapture",
                 screenWidth,
                 screenHeight,
                 screenDensity,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader?.surface,
+                reader.surface,
                 null,
                 null
             )
         } catch (e: Exception) {
+            // در اندروید ۱۴+ ساخت دوباره VirtualDisplay روی یک پروجکشن مجاز نیست
             e.printStackTrace()
+            imageReader?.close()
+            imageReader = null
+            virtualDisplay = null
+        }
+    }
+
+    private fun releaseCaptureSurfaces() {
+        isProjectionReady = false
+        try {
+            virtualDisplay?.release()
+        } catch (_: Exception) {
+        }
+        virtualDisplay = null
+        try {
+            imageReader?.close()
+        } catch (_: Exception) {
+        }
+        imageReader = null
+        hasFrame = false
+    }
+
+    private fun releaseProjection() {
+        val old = mediaProjection
+        mediaProjection = null
+        releaseCaptureSurfaces()
+        try {
+            old?.stop()
+        } catch (_: Exception) {
         }
     }
 
@@ -166,56 +230,116 @@ class ScreenCaptureService : Service() {
     fun getOcrScanner(): ScreenOcrScanner = ocrScanner
 
     /**
-     * تصویربرداری مستقیم از بافر صفحه نمایش با حفظ فریم قبلی در صورت سکون تصویر
+     * خواندن جدیدترین فریم در بافر قابل استفاده مجدد. فقط داخل frameMutex صدا زده شود.
+     * اگر فریم جدیدی نیامده باشد (صفحه ساکن)، آخرین فریم معتبر برگردانده می‌شود.
      */
-    suspend fun getLatestScreenBitmap(): Bitmap? = withContext(Dispatchers.IO) {
-        if (mediaProjection == null) return@withContext null
+    private suspend fun decodeLatestFrameLocked(waitAttempts: Int = 0): Bitmap? {
+        if (mediaProjection == null) return null
         if (imageReader == null || virtualDisplay == null) {
             setupVirtualDisplay()
             delay(120)
         }
-        val reader = imageReader ?: return@withContext null
+        val reader = imageReader ?: return if (hasFrame) frameBitmap else null
 
         var image: Image? = null
-        try {
-            image = reader.acquireLatestImage() ?: reader.acquireNextImage()
-        } catch (e: Exception) {
-            // نادیده گرفتن استثنای بافر
+        var attempt = 0
+        while (true) {
+            image = try {
+                reader.acquireLatestImage()
+            } catch (e: Exception) {
+                null
+            }
+            if (image != null || attempt >= waitAttempts) break
+            attempt++
+            delay(40)
         }
 
-        if (image != null) {
+        val img = image
+        if (img != null) {
             try {
-                val planes = image.planes
-                val buffer = planes[0].buffer
-                val pixelStride = planes[0].pixelStride
-                val rowStride = planes[0].rowStride
-                val rowPadding = rowStride - pixelStride * screenWidth
-
-                val bitmap = Bitmap.createBitmap(
-                    screenWidth + rowPadding / pixelStride,
-                    screenHeight,
-                    Bitmap.Config.ARGB_8888
-                )
-                bitmap.copyPixelsFromBuffer(buffer)
-                image.close()
-
-                val cleanBitmap = if (rowPadding == 0) {
-                    bitmap
-                } else {
-                    val cropped = Bitmap.createBitmap(bitmap, 0, 0, screenWidth, screenHeight)
-                    bitmap.recycle()
-                    cropped
-                }
-
-                cachedLatestBitmap?.recycle()
-                cachedLatestBitmap = cleanBitmap
+                copyImageIntoFrame(img)
             } catch (e: Exception) {
-                image.close()
+                e.printStackTrace()
+            } finally {
+                img.close()
             }
         }
+        return if (hasFrame) frameBitmap else null
+    }
 
-        // در صورتی که صفحه کاملاً ساکن باشد و فریم جدید نیامده باشد، از آخرین فریم پایدار استفاده می‌شود
-        cachedLatestBitmap
+    private fun copyImageIntoFrame(image: Image) {
+        val plane = image.planes[0]
+        val buffer = plane.buffer
+        val pixelStride = plane.pixelStride
+        val rowStride = plane.rowStride
+        val width = image.width
+        val height = image.height
+        val rowPadding = rowStride - pixelStride * width
+
+        var frame = frameBitmap
+        var canvas = frameCanvas
+        if (frame == null || canvas == null || frame.width != width || frame.height != height) {
+            frame = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            canvas = Canvas(frame)
+            frameBitmap = frame
+            frameCanvas = canvas
+        }
+
+        buffer.rewind()
+        if (rowPadding == 0) {
+            frame.copyPixelsFromBuffer(buffer)
+        } else {
+            val paddedWidth = width + rowPadding / pixelStride
+            var staging = stagingBitmap
+            if (staging == null || staging.width != paddedWidth || staging.height != height) {
+                staging = Bitmap.createBitmap(paddedWidth, height, Bitmap.Config.ARGB_8888)
+                stagingBitmap = staging
+            }
+            staging.copyPixelsFromBuffer(buffer)
+            canvas.drawBitmap(staging, 0f, 0f, copyPaint)
+        }
+        hasFrame = true
+    }
+
+    /**
+     * نمونه‌برداری سبک از جدیدترین فریم بدون هیچ تخصیص حافظه Bitmap جدید (مخصوص حلقه پایش اسکرول)
+     */
+    suspend fun sampleScreen(reusableBuffer: IntArray? = null): IntArray? = withContext(Dispatchers.IO) {
+        frameMutex.withLock {
+            decodeLatestFrameLocked()?.let { extractScreenSamples(it, reusableBuffer) }
+        }
+    }
+
+    /**
+     * یک کپی مستقل و پایدار از جدیدترین فریم. مالکیت با فراخواننده است و
+     * می‌تواند پس از استفاده آن را recycle کند؛ هیچ کد دیگری آن را recycle نمی‌کند.
+     */
+    suspend fun snapshotScreenBitmap(waitAttempts: Int = 0): Bitmap? = withContext(Dispatchers.IO) {
+        frameMutex.withLock {
+            decodeLatestFrameLocked(waitAttempts)?.copy(Bitmap.Config.ARGB_8888, false)
+        }
+    }
+
+    /**
+     * سازگاری با نسخه قبلی: اکنون همیشه یک کپی مستقل برمی‌گرداند (دیگر بعداً recycle نمی‌شود).
+     */
+    suspend fun getLatestScreenBitmap(): Bitmap? = snapshotScreenBitmap()
+
+    /**
+     * اجرای OCR روی یک کپی از تصویر ورودی خارج از ترد اصلی. تصویر ورودی دست‌نخورده می‌ماند.
+     */
+    suspend fun scanScreenBitmap(bitmap: Bitmap): List<RecognizedBlock> = withContext(Dispatchers.Default) {
+        if (bitmap.isRecycled) return@withContext emptyList()
+        val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return@withContext emptyList()
+        try {
+            val preferences = AppPreferences.getInstance(applicationContext)
+            ocrScanner.scanBitmap(copy, filterSystemMargins = true, ocrLanguageMode = preferences.ocrLanguageMode)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        } finally {
+            if (!copy.isRecycled) copy.recycle()
+        }
     }
 
     /**
@@ -302,7 +426,6 @@ class ScreenCaptureService : Service() {
                 val g1 = ((p1 shr 16 and 0xFF) * 30 + (p1 shr 8 and 0xFF) * 59 + (p1 and 0xFF) * 11) / 100
                 val g2 = ((p2 shr 16 and 0xFF) * 30 + (p2 shr 8 and 0xFF) * 59 + (p2 and 0xFF) * 11) / 100
 
-                // اختلاف بیش از ۲۰ سطح روشنایی نشانه تغییر محتوای کمیک است نه نویز سنسور/GPU
                 if (kotlin.math.abs(g1 - g2) > 20) {
                     significantDiffCount++
                 }
@@ -337,88 +460,33 @@ class ScreenCaptureService : Service() {
     /**
      * تصویربرداری مستقیم برای تک اسکن‌ها با حلقه انتظار جهت فریم تمیز
      */
-    suspend fun captureAndScanScreen(): List<RecognizedBlock> = withContext(Dispatchers.IO) {
-        if (mediaProjection == null) return@withContext emptyList()
-        if (imageReader == null || virtualDisplay == null) {
-            setupVirtualDisplay()
-            delay(100)
-        }
-        val reader = imageReader ?: return@withContext emptyList()
-
-        var image: Image? = null
-        for (attempt in 0 until 10) {
-            image = try {
-                reader.acquireLatestImage() ?: reader.acquireNextImage()
-            } catch (e: Exception) {
-                null
-            }
-            if (image != null) break
-            delay(40)
-        }
-
-        val bitmapToScan: Bitmap?
-        if (image != null) {
-            val planes = image.planes
-            val buffer = planes[0].buffer
-            val pixelStride = planes[0].pixelStride
-            val rowStride = planes[0].rowStride
-            val rowPadding = rowStride - pixelStride * screenWidth
-
-            val bitmap = Bitmap.createBitmap(
-                screenWidth + rowPadding / pixelStride,
-                screenHeight,
-                Bitmap.Config.ARGB_8888
-            )
-            bitmap.copyPixelsFromBuffer(buffer)
-            image.close()
-
-            val cleanBitmap = if (rowPadding == 0) {
-                bitmap
-            } else {
-                val cropped = Bitmap.createBitmap(bitmap, 0, 0, screenWidth, screenHeight)
-                bitmap.recycle()
-                cropped
-            }
-
-            cachedLatestBitmap?.recycle()
-            cachedLatestBitmap = cleanBitmap
-            bitmapToScan = cleanBitmap
-        } else {
-            bitmapToScan = cachedLatestBitmap
-        }
-
-        if (bitmapToScan == null) {
-            return@withContext emptyList()
-        }
-
-        try {
-            val copy = bitmapToScan.copy(Bitmap.Config.ARGB_8888, false)
-            val preferences = com.screenreader.translator.data.local.AppPreferences.getInstance(applicationContext)
-            val blocks = ocrScanner.scanBitmap(copy, filterSystemMargins = true, ocrLanguageMode = preferences.ocrLanguageMode)
-            copy.recycle()
-            blocks
-        } catch (e: Exception) {
-            emptyList()
+    suspend fun captureAndScanScreen(): List<RecognizedBlock> {
+        val snapshot = snapshotScreenBitmap(waitAttempts = 10) ?: return emptyList()
+        return try {
+            scanScreenBitmap(snapshot)
+        } finally {
+            snapshot.recycle()
         }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         serviceScope.cancel()
-        virtualDisplay?.release()
-        imageReader?.close()
-        mediaProjection?.stop()
+        releaseProjection()
         ocrScanner.close()
-        cachedLatestBitmap?.recycle()
-        cachedLatestBitmap = null
+        frameBitmap = null
+        frameCanvas = null
+        stagingBitmap = null
+        super.onDestroy()
     }
 
     companion object {
         const val NOTIFICATION_ID = 1002
         const val ACTION_START_PROJECTION = "com.screenreader.translator.action.START_PROJECTION"
+        const val ACTION_STOP_PROJECTION = "com.screenreader.translator.action.STOP_PROJECTION"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
 
+        @Volatile
         var isProjectionReady: Boolean = false
     }
 }

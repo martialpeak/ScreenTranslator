@@ -40,12 +40,16 @@ class MainActivity : ComponentActivity() {
     private var hasProjectionPermission by mutableStateOf(false)
     private var isServiceRunning by mutableStateOf(false)
 
+    // مجوز همین الان گرفته شده و سرویس کپچر هنوز در حال راه‌اندازی است
+    private var projectionJustGranted = false
+
     // دریافت نتیجه مجوز کپچر صفحه (MediaProjection)
     private val projectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             hasProjectionPermission = true
+            projectionJustGranted = true
             startCaptureService(result.resultCode, result.data!!)
             startBubbleServiceInternal()
             Toast.makeText(this, "دکمه شناور روی صفحه فعال شد", Toast.LENGTH_SHORT).show()
@@ -77,6 +81,14 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         checkPermissions()
         isServiceRunning = FloatingBubbleService.isRunning
+
+        // همگام‌سازی وضعیت مجوز با وضعیت واقعی سرویس کپچر (بعد از recreate شدن Activity،
+        // یا وقتی کاربر از نوار اعلان/سیستم پروجکشن را متوقف کرده است)
+        if (projectionJustGranted) {
+            projectionJustGranted = false
+        } else {
+            hasProjectionPermission = ScreenCaptureService.isProjectionReady
+        }
     }
 
     private fun checkPermissions() {
@@ -139,7 +151,7 @@ class MainActivity : ComponentActivity() {
                 requestOverlayPermission()
                 return
             }
-            if (!hasProjectionPermission) {
+            if (!hasProjectionPermission || !ScreenCaptureService.isProjectionReady) {
                 requestProjectionPermission()
                 return
             }
@@ -151,6 +163,8 @@ class MainActivity : ComponentActivity() {
             }
             startService(intent)
             isServiceRunning = false
+            // با توقف حباب، سرویس کپچر و MediaProjection هم متوقف می‌شوند
+            hasProjectionPermission = false
         }
     }
 
