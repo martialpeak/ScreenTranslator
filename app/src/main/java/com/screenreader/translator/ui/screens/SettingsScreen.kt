@@ -42,6 +42,7 @@ fun SettingsScreen() {
     val coroutineScope = rememberCoroutineScope()
     val preferences = remember { AppPreferences.getInstance(context) }
     val batchLlmTranslator = remember { BatchLlmTranslator(preferences) }
+    val uriHandler = LocalUriHandler.current
 
     var overlayOpacity by remember { mutableFloatStateOf(preferences.overlayOpacity) }
     var autoSpeak by remember { mutableStateOf(false) }
@@ -1401,7 +1402,7 @@ fun SettingsScreen() {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ۴. درباره برنامه
+        // ۴. درباره برنامه و حمایت‌های مالی
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -1410,7 +1411,49 @@ fun SettingsScreen() {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = "درباره مترجم روی صفحه و کتابخوان مانهوا", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "نسخه ۱.۳.۰ | مجهز به داکیومنت کامل API، زنجیره رفع ریت‌لیمیت و Room FTS5", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                Text(text = "نسخه ۱.۳.۰ | مجهز به ترجمه زنده، اسکن OCR، خوانشگر مانهوا و خروجی WebP/PDF", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = BorderDark)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // دکمه مخزن گیت‌هاب
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            uriHandler.openUri("https://github.com/martialpeak/ScreenTranslator")
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "خطا در باز کردن مرورگر", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Code, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("مخزن گیت‌هاب (GitHub Repository)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // دکمه حمایت مالی (دونیتو)
+                Button(
+                    onClick = {
+                        try {
+                            uriHandler.openUri("https://donito.me/M_Alone")
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "خطا در باز کردن مرورگر", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("❤️ حمایت مالی از پروژه (Donito)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
             }
         }
 

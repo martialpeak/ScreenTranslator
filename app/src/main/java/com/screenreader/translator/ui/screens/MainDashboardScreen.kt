@@ -19,7 +19,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -38,6 +40,7 @@ fun MainDashboardScreen(
     onToggleService: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
@@ -118,6 +121,11 @@ fun MainDashboardScreen(
                 }
             }
         )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // کارت حمایت مالی و مخزن گیت‌هاب
+        DonationAndGithubCard(uriHandler = uriHandler, context = context)
 
         Spacer(modifier = Modifier.height(24.dp))
     }
@@ -505,6 +513,80 @@ private fun QuickTestCard(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DonationAndGithubCard(uriHandler: androidx.compose.ui.platform.UriHandler, context: Context) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBackground)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFF43F5E), modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "حمایت مالی و مخزن گیت‌هاب",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "این پروژه به صورت متن‌باز توسعه داده می‌شود. با حمایت مالی می‌توانید به توسعه قابلیت‌های جدید و استمرار پروژه کمک کنید.",
+                color = TextSecondary,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            uriHandler.openUri("https://github.com/martialpeak/ScreenTranslator")
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "خطا در باز کردن مرورگر", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Code, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("گیت‌هاب", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = {
+                        try {
+                            uriHandler.openUri("https://donito.me/M_Alone")
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "خطا در باز کردن مرورگر", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                    modifier = Modifier.weight(1.3f)
+                ) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("حمایت مالی (Donito)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
