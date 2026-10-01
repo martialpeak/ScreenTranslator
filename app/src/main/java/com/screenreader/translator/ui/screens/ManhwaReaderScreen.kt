@@ -16,6 +16,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -427,30 +428,55 @@ fun ManhwaReaderScreen() {
             .padding(16.dp)
     ) {
         // نوار تب‌های سه‌گانه انتخاب مود: PDF، تصاویر چندگانه، یا وب‌تون آنلاین
-        TabRow(
-            selectedTabIndex = selectedMode,
-            containerColor = SurfaceDark,
-            contentColor = Color.White,
+        // نوار تب‌های سه‌گانه مدرن با طراحی کپسولی (Segmented Pill Control)
+        Surface(
+            color = SurfaceDark,
+            shape = RoundedCornerShape(16.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Tab(
-                selected = selectedMode == 0,
-                onClick = { selectedMode = 0 },
-                text = { Text("📄 فایل PDF", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                icon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp)) }
-            )
-            Tab(
-                selected = selectedMode == 1,
-                onClick = { selectedMode = 1 },
-                text = { Text("🖼️ تصاویر چپتر", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                icon = { Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp)) }
-            )
-            Tab(
-                selected = selectedMode == 2,
-                onClick = { selectedMode = 2 },
-                text = { Text("🌐 وب‌تون با لینک", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                icon = { Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp)) }
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(
+                    Triple(0, "فایل PDF", Icons.Default.PictureAsPdf),
+                    Triple(1, "تصاویر چپتر", Icons.Default.Image),
+                    Triple(2, "وب‌تون با لینک", Icons.Default.Language)
+                ).forEach { (idx, title, icon) ->
+                    val isSelected = selectedMode == idx
+                    Surface(
+                        onClick = { selectedMode = idx },
+                        color = if (isSelected) PrimaryBlue else Color.Transparent,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                icon,
+                                contentDescription = null,
+                                tint = if (isSelected) Color.White else TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = title,
+                                color = if (isSelected) Color.White else TextSecondary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -459,11 +485,12 @@ fun ManhwaReaderScreen() {
             // === حالت ۱: کتابخوان فایل PDF مانهوا ===
             Card(
                 colors = CardDefaults.cardColors(containerColor = CardBackground),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -480,7 +507,7 @@ fun ManhwaReaderScreen() {
                         textAlign = TextAlign.Center
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -489,34 +516,48 @@ fun ManhwaReaderScreen() {
                     ) {
                         Surface(
                             color = SurfaceDark,
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AccentCyan.copy(alpha = 0.35f))
                         ) {
-                            Text(
-                                text = "موتور: $providerName",
-                                color = AccentCyan,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Bolt, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = providerName,
+                                    color = AccentCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.width(8.dp))
 
                         Surface(
                             color = SurfaceDark,
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
                         ) {
-                            Text(
-                                text = "تم بالن: $bubbleThemeLabel",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Palette, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = bubbleThemeLabel,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Button(
                         onClick = {
@@ -525,13 +566,16 @@ fun ManhwaReaderScreen() {
                         enabled = !isBusy,
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = null)
+                        Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (isProcessingPdf) "در حال پردازش و ترجمه صفحات..." else "📁 انتخاب فایل PDF چپتر",
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
                         )
                     }
 
@@ -563,8 +607,11 @@ fun ManhwaReaderScreen() {
                         },
                         enabled = !isBusy,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentCyan)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2DD4BF)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2DD4BF).copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Default.Transform, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
@@ -578,14 +625,14 @@ fun ManhwaReaderScreen() {
                     if (isConvertingPdfToWebp) {
                         Spacer(modifier = Modifier.height(10.dp))
                         LinearProgressIndicator(
-                            color = AccentCyan,
+                            color = Color(0xFF2DD4BF),
                             trackColor = SurfaceDark,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = convertProgress.ifEmpty { "در حال تبدیل صفحات PDF به فرمت فشرده WebP در ZIP..." },
-                            color = AccentCyan,
+                            color = Color(0xFF2DD4BF),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -597,11 +644,12 @@ fun ManhwaReaderScreen() {
             // === حالت ۲: تصاویر چندگانه چپتر (پوشه / گالری) ===
             Card(
                 colors = CardDefaults.cardColors(containerColor = CardBackground),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -618,7 +666,7 @@ fun ManhwaReaderScreen() {
                         textAlign = TextAlign.Center
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -627,34 +675,48 @@ fun ManhwaReaderScreen() {
                     ) {
                         Surface(
                             color = SurfaceDark,
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AccentCyan.copy(alpha = 0.35f))
                         ) {
-                            Text(
-                                text = "موتور: $providerName",
-                                color = AccentCyan,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Bolt, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = providerName,
+                                    color = AccentCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.width(8.dp))
 
                         Surface(
                             color = SurfaceDark,
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
                         ) {
-                            Text(
-                                text = "تم بالن: $bubbleThemeLabel",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Palette, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = bubbleThemeLabel,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Button(
                         onClick = {
@@ -663,13 +725,16 @@ fun ManhwaReaderScreen() {
                         enabled = !isBusy,
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     ) {
-                        Icon(Icons.Default.Image, contentDescription = null)
+                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isProcessingImages) "در حال پردازش و ترجمه تصاویر..." else "🖼️ انتخاب تصاویر چپتر مانهوا",
-                            fontWeight = FontWeight.Bold
+                            text = if (isProcessingImages) "در حال پردازش و ترجمه تصاویر..." else "🖼️ انتخاب تصاویر چپتر مانهوا (گالری)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
                         )
                     }
 
@@ -701,13 +766,16 @@ fun ManhwaReaderScreen() {
                         },
                         enabled = !isBusy,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA78BFA))
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA78BFA)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA78BFA).copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Default.FolderZip, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isImportingZip) "در حال پردازش و ترجمه ZIP..." else "📦 انتخاب فایل ZIP تصاویر (WebP/JPG/PNG)",
+                            text = if (isImportingZip) "در حال پردازش و ترجمه ZIP..." else "📦 ورود مستقیم فایل ZIP تصاویر (WebP/JPG/PNG)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )
@@ -1126,39 +1194,50 @@ fun ManhwaReaderScreen() {
             if (renderedPages.isNotEmpty()) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp)
+                        .padding(bottom = 10.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "📖 ${renderedPages.size} صفحه ترجمه‌شده",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                color = SuccessGreen.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "📖 ${renderedPages.size} صفحه ترجمه‌شده",
+                                    color = SuccessGreen,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // دکمه پاکسازی و شروع صفحه جدید
                             OutlinedButton(
                                 onClick = { renderedPages.clear() },
                                 enabled = !isBusy,
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed.copy(alpha = 0.9f))
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("پاکسازی", fontSize = 11.sp)
                             }
+                        }
 
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             // دکمه ذخیره خروجی PDF
                             Button(
                                 onClick = {
@@ -1166,14 +1245,15 @@ fun ManhwaReaderScreen() {
                                     pdfExportLauncher.launch("manhwa_${prefix}_${System.currentTimeMillis()}.pdf")
                                 },
                                 enabled = !isBusy,
-                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (isExportingPdf) "ذخیره..." else "💾 PDF",
+                                    text = if (isExportingPdf) "ذخیره..." else "ذخیره PDF",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1187,26 +1267,28 @@ fun ManhwaReaderScreen() {
                                 },
                                 enabled = !isBusy,
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.weight(1.1f)
                             ) {
                                 Icon(Icons.Default.FolderZip, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (isExportingWebpZip) "ذخیره..." else "📦 WebP+ZIP",
+                                    text = if (isExportingWebpZip) "ذخیره..." else "خروجی WebP+ZIP",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                         }
-                    }
 
-                    if (isExportingPdf || isExportingWebpZip) {
-                        LinearProgressIndicator(
-                            color = if (isExportingWebpZip) Color(0xFF0284C7) else SuccessGreen,
-                            trackColor = CardBackground,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        if (isExportingPdf || isExportingWebpZip) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                color = if (isExportingWebpZip) Color(0xFF0284C7) else SuccessGreen,
+                                trackColor = CardBackground,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 }
 
@@ -1235,19 +1317,54 @@ fun ManhwaReaderScreen() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(32.dp),
+                        .padding(20.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = if (selectedMode == 0) {
-                            "یک فایل PDF کمیک را انتخاب کنید تا صفحات آن همراه با بالن‌های ترجمه شده فارسی به صورت اسکرولی نمایش داده شود."
-                        } else {
-                            "تصاویر یک چپتر را انتخاب کنید تا به ترتیب خوانده شده و صفحات ترجمه با بالن‌های فارسی بازچینی شوند."
-                        },
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(20.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark),
+                        modifier = Modifier.fillMaxWidth(0.94f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .background(PrimaryBlue.copy(alpha = 0.15f), CircleShape)
+                                    .border(1.5.dp, PrimaryBlue.copy(alpha = 0.4f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (selectedMode == 0) Icons.Default.PictureAsPdf else Icons.Default.AutoStories,
+                                    contentDescription = null,
+                                    tint = PrimaryBlue,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Text(
+                                text = if (selectedMode == 0) "کتابخوان هوشمند PDF مانهوا" else "خوانشگر تصاویر و بسته‌های چپتر",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = if (selectedMode == 0) {
+                                    "فایل PDF چپتر کمیک را از دکمه بالا انتخاب کنید تا تمامی صفحات، اسکن و با بالن‌های فارسی بازنویسی شوند."
+                                } else {
+                                    "عکس‌های یک چپتر یا فایل ZIP آن را انتخاب کنید تا برنامه به ترتیب صفحات را اسکن و ترجمه کند."
+                                },
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -218,20 +218,61 @@ fun SettingsScreen() {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text(
-            text = "تنظیمات پیشرفته برنامه",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextPrimary,
-            fontWeight = FontWeight.Bold
-        )
+        // سربرگ مدرن تنظیمات
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(PrimaryBlue.copy(alpha = 0.15f), CircleShape)
+                        .border(1.5.dp, PrimaryBlue.copy(alpha = 0.4f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = PrimaryBlue,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column {
+                    Text(
+                        text = "تنظیمات پیشرفته برنامه",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "پیکربندی هوش مصنوعی، بالن‌های کمیک و پشتیبان‌گیری",
+                        color = TextSecondary,
+                        fontSize = 11.5.sp
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         // ۱. کارت جامع تنظیمات هوش مصنوعی، بخش اختصاصی کلیدها، فیلتر مدل‌های رایگان، تست همگانی و زنجیره فال‌بک
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBackground)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -916,8 +957,9 @@ fun SettingsScreen() {
         // ۲. بخش پشتیبان‌گیری و خروجی دیتابیس
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBackground)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1041,8 +1083,9 @@ fun SettingsScreen() {
         // ۳. شخصی‌سازی ظاهر بالن‌های کمیک و مانهوا
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBackground)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1185,8 +1228,9 @@ fun SettingsScreen() {
         // ۴. بهینه‌سازی سرعت و موتور اسکن (OCR)
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBackground)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1348,8 +1392,9 @@ fun SettingsScreen() {
         // ۵. تنظیمات نمایش لایه شناور
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBackground)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -1405,8 +1450,9 @@ fun SettingsScreen() {
         // ۴. درباره برنامه و حمایت‌های مالی
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBackground)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = "درباره مترجم روی صفحه و کتابخوان مانهوا", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
