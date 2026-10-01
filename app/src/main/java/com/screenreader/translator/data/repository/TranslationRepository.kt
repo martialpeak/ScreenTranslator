@@ -16,6 +16,7 @@ import com.screenreader.translator.ScreenTranslatorApp
 import com.screenreader.translator.data.local.AppPreferences
 import com.screenreader.translator.data.local.entity.GlossaryEntity
 import com.screenreader.translator.data.local.entity.OfflineDictionaryEntity
+import com.screenreader.translator.engine.ocr.ComicTextNormalizer
 import com.screenreader.translator.engine.translation.BatchLlmTranslator
 
 class TranslationRepository(
@@ -43,14 +44,21 @@ class TranslationRepository(
     }
 
     /**
+     * کلید یکتای کش: همیشه از متن «نرمال‌شده» ساخته می‌شود تا جستجو و ذخیره با هم یکی باشند.
+     */
+    private fun normalizeForKey(text: String): String = ComicTextNormalizer.normalize(text).trim()
+
+    private fun cacheKey(normalized: String): String = calculateSha256(normalized.lowercase())
+
+    /**
      * ترجمه تک متن بر اساس پایپ‌لاین هوشمند:
      * کش حافظه رم (L1) -> اصطلاحات کاربر -> دیکشنری آفلاین -> کش پایگاه داده -> مدل آفلاین -> سرور آنلاین -> ذخیره در کش
      */
     suspend fun translateText(text: String, sourceApp: String? = null): String = withContext(Dispatchers.IO) {
-        val trimmed = com.screenreader.translator.engine.ocr.ComicTextNormalizer.normalize(text).trim()
+        val trimmed = normalizeForKey(text)
         if (trimmed.isEmpty()) return@withContext ""
 
-        val hash = calculateSha256(trimmed.lowercase())
+        val hash = cacheKey(trimmed)
 
         // ۰. بررسی سریع در کش فوق‌سریع L1 در حافظه رم (< 1ms)
         val memHit = memoryCache.get(hash)
@@ -109,14 +117,14 @@ class TranslationRepository(
         // 5. ترجمه جدید از طریق موتور آفلاین یا آنلاین
         var translatedResult: String? = null
 
-        // تلاش با موتور آفلاین در صورت آماده بودن مدل
+        // تلاش با موتور آفلاین در صورت آماده بودن مدل (فقط متن انگلیسی)
         try {
             translatedResult = offlineTranslator.translate(trimmed)
         } catch (e: Exception) {
-            // مدل آفلاین آماده نبوده یا خطا داده است
+            // مدل آفلاین آماده نبوده، زبان پشتیبانی نمی‌شود یا خطا داده است
         }
 
-        // در صورت عدم موفقیت موتور آفلاین، استفاده از موتور آنلاین پشتیبان
+        // در صورت عدم موفقیت موتور آفلاین، استفاده از موتور آنلاین پشتیبان (تشخیص خودکار زبان)
         if (translatedResult.isNullOrEmpty()) {
             try {
                 translatedResult = onlineTranslator.translate(trimmed)
@@ -167,16 +175,18 @@ class TranslationRepository(
 
         val results = arrayOfNulls<RecognizedBlock>(blocks.size)
         val missingIndices = mutableListOf<Int>()
+        val normalizedTexts = arrayOfNulls<String>(blocks.size)
 
         // فیلتر سریع موارد موجود در کش L1 و پایگاه داده برای صرفه‌جویی ۱۰۰٪ در مصرف توکن و پردازش
         for (i in blocks.indices) {
             val block = blocks[i]
-            val normalized = com.screenreader.translator.engine.ocr.ComicTextNormalizer.normalize(block.originalText).trim()
+            val normalized = normalizeForKey(block.originalText)
+            normalizedTexts[i] = normalized
             if (normalized.isEmpty()) {
                 results[i] = block.copy(translatedText = "")
                 continue
             }
-            val hash = calculateSha256(normalized.lowercase())
+            val hash = cacheKey(normalized)
             val memCached = memoryCache.get(hash)
             if (memCached != null) {
                 results[i] = block.copy(translatedText = memCached)
@@ -202,37 +212,38 @@ class TranslationRepository(
         if (isLlmConfigured) {
             try {
                 // ارسال دسته‌ای متون ترجمه نشده به هوش مصنوعی (Gemini / Grok / GPT) به همراه تصویر در صورت فعال بودن Vision
-                val missingBlocks = missingIndices.map { blocks[it] }
-                val textList = missingBlocks.map { com.screenreader.translator.engine.ocr.ComicTextNormalizer.normalize(it.originalText) }
+                val textList = missingIndices.map { normalizedTexts[it] ?: "" }
                 val batchTranslations = batchLlmTranslator.translateBatch(textList, sourceBitmap)
 
                 if (batchTranslations.isNotEmpty()) {
                     missingIndices.forEachIndexed { batchIdx, origIdx ->
                         val block = blocks[origIdx]
-                        val batchText = batchTranslations[batchIdx]
+                        val normalized = normalizedTexts[origIdx] ?: ""
+                        // اگر مدل تعداد کمتری خروجی برگرداند، به‌جای کرش، همان مورد با فال‌بک ترجمه می‌شود
+                        val batchText = batchTranslations.getOrNull(batchIdx)
                         val finalTrans = if (!batchText.isNullOrBlank()) {
                             val colloquial = com.screenreader.translator.engine.translation.ColloquialTransformer.makeConversational(batchText)
-                            
-                            // ۱. ذخیره فوری در کش رم L1 و دیتابیس (۰ میلی‌ثانیه برای بارهای بعد)
-                            val hash = calculateSha256(block.originalText.trim().lowercase())
+
+                            // ۱. ذخیره در کش رم L1 و دیتابیس با «همان» کلیدی که هنگام جستجو استفاده می‌شود
+                            val hash = cacheKey(normalized)
                             memoryCache.put(hash, colloquial)
                             cacheDao.insertOrUpdate(
                                 TranslationCacheEntity(
                                     sourceHash = hash,
-                                    originalText = block.originalText.trim(),
+                                    originalText = normalized,
                                     translatedText = colloquial
                                 )
                             )
 
                             // ۲. یادگیری خودکار واژگان و اصطلاحات جدید در دیتابیس
                             if (preferences.isAutoLearnEnabled) {
-                                autoLearnWords(block.originalText.trim(), colloquial)
+                                autoLearnWords(normalized, colloquial)
                             }
 
                             // ۳. ثبت در تاریخچه
                             historyDao.insert(
                                 HistoryEntity(
-                                    originalText = block.originalText.trim(),
+                                    originalText = normalized,
                                     translatedText = colloquial,
                                     sourceApp = sourceApp
                                 )
@@ -245,13 +256,16 @@ class TranslationRepository(
                     }
                     return@withContext results.filterNotNull()
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
 
         // در صورت عدم تنظیم هوش مصنوعی یا خطا در شبکه، فال‌بک موازی به دیکشنری و ML Kit
-        val deferredList = missingIndices.map { origIdx ->
+        val pendingIndices = missingIndices.filter { results[it] == null }
+        val deferredList = pendingIndices.map { origIdx ->
             val block = blocks[origIdx]
             async {
                 val translation = translateText(block.originalText, sourceApp)
@@ -266,9 +280,6 @@ class TranslationRepository(
     }
 
     /**
-     * سیستم خودآموز دیتابیس: ثبت کلمات و عبارات کوتاه استخراج شده در لغت‌نامه آفلاین و اصطلاح‌نامه
-     */
-    /**
      * حذف بنیادین یک ترجمه از کلیه سطوح رم، کش و دیتابیس تا دیگر تحت هیچ شرایطی بازنگردد.
      */
     suspend fun deleteTranslationCompletely(originalText: String) = withContext(Dispatchers.IO) {
@@ -276,34 +287,38 @@ class TranslationRepository(
         if (trimmed.isEmpty()) return@withContext
 
         val clean = trimmed.trimEnd('.', '!', '?', ',', ':', ';', '"', '\'', '-', '~', '…', ' ').trim()
-        val hash = calculateSha256(trimmed.lowercase())
-        val cleanHash = calculateSha256(clean.lowercase())
+        val normalized = normalizeForKey(trimmed)
+        val hashes = setOf(
+            calculateSha256(trimmed.lowercase()),
+            calculateSha256(clean.lowercase()),
+            cacheKey(normalized)
+        )
 
-        // 1. حذف از حافظه رم L1
-        memoryCache.remove(hash)
-        memoryCache.remove(cleanHash)
-
-        // 2. حذف از کش پایگاه داده Room
-        cacheDao.deleteByHash(hash)
-        cacheDao.deleteByHash(cleanHash)
+        // 1. حذف از حافظه رم L1 و کش پایگاه داده Room
+        for (h in hashes) {
+            memoryCache.remove(h)
+            cacheDao.deleteByHash(h)
+        }
         cacheDao.deleteByOriginalText(trimmed)
         cacheDao.deleteByOriginalText(clean)
+        if (normalized != trimmed) cacheDao.deleteByOriginalText(normalized)
 
-        // 3. حذف از اصطلاحات سفارشی (در صورت وجود)
+        // 2. حذف از اصطلاحات سفارشی (در صورت وجود)
         glossaryDao.deleteByTerm(trimmed)
         glossaryDao.deleteByTerm(clean)
 
-        // 4. حذف از واژه‌نامه آفلاین در صورتی که توسط آموزش خودکار اضافه شده باشد
+        // 3. حذف از واژه‌نامه آفلاین در صورتی که توسط آموزش خودکار اضافه شده باشد
         dictionaryDao.deleteAutoLearnedWord(trimmed)
         dictionaryDao.deleteAutoLearnedWord(clean)
     }
 
     /**
-     * پاکسازی صرفاً واژگان اشتباه ثبت‌شده ناشی از یادگیری خودکار بدون دستکاری کش ترجمه‌های معتبر کاربر
+     * پاکسازی صرفاً واژگان اشتباه ثبت‌شده ناشی از یادگیری خودکار بدون دستکاری کش ترجمه‌های معتبر کاربر.
+     * توجه: این متد همه واژگان خودآموز را پاک می‌کند؛ فقط به‌صورت دستی یا یک‌بار (مهاجرت) صدا زده شود.
      */
     suspend fun purgeCorruptedAutoLearned(): Int = withContext(Dispatchers.IO) {
-        val deletedGlossary = glossaryDao.deleteByCategory("مانهوا (آموزش‌دیده)")
-        val deletedDict = dictionaryDao.deleteByPartOfSpeech("مانهوا (آموزش‌دیده)")
+        val deletedGlossary = glossaryDao.deleteByCategory(AUTO_LEARNED_TAG)
+        val deletedDict = dictionaryDao.deleteByPartOfSpeech(AUTO_LEARNED_TAG)
         deletedGlossary + deletedDict
     }
 
@@ -318,8 +333,8 @@ class TranslationRepository(
         cacheDao.clearCache()
 
         // ۳. پاکسازی واژگان اشتباه ثبت‌شده در اصطلاح‌نامه و دیکشنری
-        val deletedGlossary = glossaryDao.deleteByCategory("مانهوا (آموزش‌دیده)")
-        val deletedDict = dictionaryDao.deleteByPartOfSpeech("مانهوا (آموزش‌دیده)")
+        val deletedGlossary = glossaryDao.deleteByCategory(AUTO_LEARNED_TAG)
+        val deletedDict = dictionaryDao.deleteByPartOfSpeech(AUTO_LEARNED_TAG)
 
         deletedGlossary + deletedDict
     }
@@ -354,10 +369,10 @@ class TranslationRepository(
             // رد کردن کلمات ممنوعه، ضمایر و علائم
             if (commonStopWords.contains(lower)) return
 
-            val words = cleanOriginal.split("\\s+".toRegex())
+            val words = cleanOriginal.split(WHITESPACE)
 
             // تنها تک‌کلمه‌های با طول ۴ تا ۲۰ حرف انگلیسی الفبایی خالص که معنی مشخص دارند
-            if (words.size == 1 && cleanOriginal.matches(Regex("^[a-zA-Z]{4,20}$"))) {
+            if (words.size == 1 && cleanOriginal.matches(SINGLE_WORD)) {
                 if (translatedText.isNotBlank() && !translatedText.startsWith("[") && translatedText.length in 2..25 && !translatedText.contains("\n")) {
                     // فقط با استراتژی IGNORE در لغت‌نامه ثبت می‌شود تا واژگان اصلی را خراب نکند
                     dictionaryDao.insertAll(
@@ -365,7 +380,7 @@ class TranslationRepository(
                             OfflineDictionaryEntity(
                                 word = cleanOriginal,
                                 persianMeanings = translatedText.trim(),
-                                partOfSpeech = "مانهوا (آموزش‌دیده)"
+                                partOfSpeech = AUTO_LEARNED_TAG
                             )
                         )
                     )
@@ -378,6 +393,19 @@ class TranslationRepository(
 
     private fun calculateSha256(input: String): String {
         val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
-        return bytes.joinToString("") { "%02x".format(it) }
+        val hex = CharArray(bytes.size * 2)
+        for (i in bytes.indices) {
+            val v = bytes[i].toInt() and 0xFF
+            hex[i * 2] = HEX_CHARS[v ushr 4]
+            hex[i * 2 + 1] = HEX_CHARS[v and 0x0F]
+        }
+        return String(hex)
+    }
+
+    companion object {
+        private const val AUTO_LEARNED_TAG = "مانهوا (آموزش‌دیده)"
+        private val HEX_CHARS = "0123456789abcdef".toCharArray()
+        private val WHITESPACE = "\\s+".toRegex()
+        private val SINGLE_WORD = Regex("^[a-zA-Z]{4,20}$")
     }
 }
