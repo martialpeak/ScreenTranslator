@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">مترجم روی صفحه</string>
+    <string name="service_notification_title">مترجم هوشمند صفحه فعال است</string>
+    <string name="service_notification_text">برای ترجمه هر متنی، دکمه شناور را لمس کنید</string>
+    <string name="stop_service">توقف مترجم</string>
+    <string name="capture_notification_title">در حال خواندن صفحه...</string>
+</resources>
