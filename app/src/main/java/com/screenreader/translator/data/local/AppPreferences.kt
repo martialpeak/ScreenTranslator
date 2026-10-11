@@ -2,6 +2,15 @@ package com.screenreader.translator.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.nio.ByteBuffer
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 /**
  * مدیریت ترجیحات برنامه، تنظیمات هوش مصنوعی، زنجیره مدل‌ها و رفع ریت‌لیمیت
@@ -25,22 +34,22 @@ class AppPreferences(context: Context) {
             PROVIDER_CUSTOM -> KEY_API_KEY_CUSTOM
             else -> KEY_API_KEY
         }
-        val specific = prefs.getString(prefKey, "") ?: ""
+        val specific = readApiKey(prefKey)
         if (specific.isNotBlank()) return specific
 
         // Migration from legacy single key if available
-        val legacy = prefs.getString(KEY_API_KEY, "") ?: ""
+        val legacy = readApiKey(KEY_API_KEY)
         if (legacy.isNotBlank()) {
             if (provider == PROVIDER_GROQ && legacy.startsWith("gsk_")) {
-                prefs.edit().putString(KEY_API_KEY_GROQ, legacy).apply()
+                writeApiKey(KEY_API_KEY_GROQ, legacy)
                 return legacy
             }
             if (provider == PROVIDER_OPENROUTER && legacy.startsWith("sk-or-")) {
-                prefs.edit().putString(KEY_API_KEY_OPENROUTER, legacy).apply()
+                writeApiKey(KEY_API_KEY_OPENROUTER, legacy)
                 return legacy
             }
             if (provider == PROVIDER_GROK && legacy.startsWith("xai-")) {
-                prefs.edit().putString(KEY_API_KEY_GROK, legacy).apply()
+                writeApiKey(KEY_API_KEY_GROK, legacy)
                 return legacy
             }
             if (provider == llmProvider) {
@@ -62,9 +71,71 @@ class AppPreferences(context: Context) {
             else -> KEY_API_KEY
         }
         val trimmed = value.trim()
-        prefs.edit().putString(prefKey, trimmed).apply()
+        writeApiKey(prefKey, trimmed)
         if (provider == llmProvider) {
-            prefs.edit().putString(KEY_API_KEY, trimmed).apply()
+            writeApiKey(KEY_API_KEY, trimmed)
+        }
+    }
+
+    /**
+     * API keys are encrypted with an AES-GCM key held by Android Keystore.
+     * Existing plaintext values are read once and transparently migrated.
+     */
+    private fun readApiKey(key: String): String {
+        val stored = prefs.getString(key, "").orEmpty()
+        if (stored.isBlank()) return ""
+        if (!stored.startsWith(ENCRYPTED_PREFIX)) {
+            writeApiKey(key, stored)
+            return stored
+        }
+        return runCatching { decryptApiKey(stored) }.getOrDefault("")
+    }
+
+    private fun writeApiKey(key: String, value: String) {
+        if (value.isBlank()) {
+            prefs.edit().remove(key).apply()
+            return
+        }
+        // Never fall back to plaintext if Keystore is unavailable.
+        prefs.edit().putString(key, encryptApiKey(value)).apply()
+    }
+
+    private fun encryptApiKey(value: String): String {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
+        val iv = cipher.iv
+        val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        val payload = ByteBuffer.allocate(iv.size + encrypted.size)
+            .put(iv)
+            .put(encrypted)
+            .array()
+        return ENCRYPTED_PREFIX + Base64.encodeToString(payload, Base64.NO_WRAP)
+    }
+
+    private fun decryptApiKey(value: String): String {
+        val payload = Base64.decode(value.removePrefix(ENCRYPTED_PREFIX), Base64.NO_WRAP)
+        require(payload.size > IV_SIZE) { "Invalid encrypted API key" }
+        val iv = payload.copyOfRange(0, IV_SIZE)
+        val encrypted = payload.copyOfRange(IV_SIZE, payload.size)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateSecretKey(), GCMParameterSpec(TAG_SIZE_BITS, iv))
+        return cipher.doFinal(encrypted).toString(Charsets.UTF_8)
+    }
+
+    private fun getOrCreateSecretKey(): SecretKey = synchronized(KEYSTORE_LOCK) {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey) ?: run {
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+            generator.init(
+                KeyGenParameterSpec.Builder(
+                    KEY_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .build()
+            )
+            generator.generateKey()
         }
     }
 
@@ -163,6 +234,13 @@ class AppPreferences(context: Context) {
         private const val KEY_API_KEY_GROK = "llm_api_key_grok"
         private const val KEY_API_KEY_GROQ = "llm_api_key_groq"
         private const val KEY_API_KEY_CUSTOM = "llm_api_key_custom"
+        private const val ENCRYPTED_PREFIX = "enc:v1:"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val KEY_ALIAS = "screen_translator_api_keys"
+        private const val TRANSFORMATION = "AES/GCM/NoPadding"
+        private const val IV_SIZE = 12
+        private const val TAG_SIZE_BITS = 128
+        private val KEYSTORE_LOCK = Any()
 
         private const val KEY_CUSTOM_MODEL = "llm_custom_model"
         private const val KEY_CUSTOM_ENDPOINT = "llm_custom_endpoint"

@@ -39,6 +39,8 @@ object PdfToWebpConverter {
         targetWidth: Int = 1440,
         onProgress: ((current: Int, total: Int) -> Unit)? = null
     ): Boolean = withContext(Dispatchers.IO) {
+        val safeTargetWidth = targetWidth.coerceAtLeast(1)
+        val safeQuality = quality.coerceIn(0, 100)
         var pfd: ParcelFileDescriptor? = null
         var renderer: PdfRenderer? = null
 
@@ -65,11 +67,11 @@ object PdfToWebpConverter {
 
                             // رندر صفحه PDF به Bitmap
                             val page = renderer.openPage(i)
-                            val scale = targetWidth.toFloat() / page.width.toFloat()
+                            val scale = safeTargetWidth.toFloat() / page.width.toFloat()
                             val pageHeight = (page.height * scale).toInt()
 
                             val pageBitmap = Bitmap.createBitmap(
-                                targetWidth, pageHeight, Bitmap.Config.ARGB_8888
+                                safeTargetWidth, pageHeight, Bitmap.Config.ARGB_8888
                             )
                             page.render(
                                 pageBitmap, null, null,
@@ -79,7 +81,7 @@ object PdfToWebpConverter {
 
                             // تبدیل به WebP
                             webpBuffer.reset()
-                            pageBitmap.compress(format, quality, webpBuffer)
+                            pageBitmap.compress(format, safeQuality, webpBuffer)
 
                             // آزادسازی حافظه Bitmap
                             pageBitmap.recycle()

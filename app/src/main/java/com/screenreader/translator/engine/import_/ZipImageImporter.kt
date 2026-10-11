@@ -33,6 +33,7 @@ object ZipImageImporter {
         targetWidth: Int = 1440,
         onProgress: ((current: Int, total: Int) -> Unit)? = null
     ): List<Bitmap> = withContext(Dispatchers.IO) {
+        val safeTargetWidth = targetWidth.coerceAtLeast(1)
         val entries = mutableListOf<Pair<String, ByteArray>>()
 
         // مرحله ۱: خواندن همه ورودی‌های تصویری ZIP به حافظه
@@ -78,7 +79,7 @@ object ZipImageImporter {
                 onProgress?.invoke(index + 1, sorted.size)
             }
 
-            val bitmap = decodeSampledBitmapFromBytes(pair.second, targetWidth)
+            val bitmap = decodeSampledBitmapFromBytes(pair.second, safeTargetWidth)
             if (bitmap != null) {
                 bitmaps.add(bitmap)
             }

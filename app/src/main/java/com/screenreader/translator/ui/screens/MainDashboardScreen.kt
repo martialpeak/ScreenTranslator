@@ -48,7 +48,6 @@ fun MainDashboardScreen(
     var isDownloadingModel by remember { mutableStateOf(false) }
 
     var cacheCount by remember { mutableIntStateOf(0) }
-    var historyCount by remember { mutableIntStateOf(0) }
 
     // باکس تست ترجمه دستی
     var testInputText by remember { mutableStateOf("Welcome to instant screen translation") }
