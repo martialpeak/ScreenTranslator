@@ -1,5 +1,6 @@
 package com.screenreader.translator.ui.screens
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -9,6 +10,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.view.ViewGroup
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -54,6 +57,7 @@ import kotlinx.coroutines.withContext
  * با قابلیت ترجمه زنده صفحه وب، استخراج دیالوگ‌ها، بالن‌گذاری فارسی و خروجی کم‌حجم PDF
  */
 @OptIn(ExperimentalMaterial3Api::class)
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun ManhwaReaderScreen() {
     val context = LocalContext.current
@@ -865,9 +869,10 @@ fun ManhwaReaderScreen() {
 
                         Button(
                             onClick = {
-                                var url = webUrl.trim()
-                                if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                                    url = "https://$url"
+                                val url = normalizeWebUrl(webUrl)
+                                if (url == null) {
+                                    Toast.makeText(context, "آدرس وب معتبر نیست", Toast.LENGTH_SHORT).show()
+                                    return@Button
                                 }
                                 activeWebUrl = url
                                 translatedWebBitmap = null
@@ -1092,11 +1097,28 @@ fun ManhwaReaderScreen() {
                                 )
                                 settings.javaScriptEnabled = true
                                 settings.domStorageEnabled = true
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = false
+                                settings.javaScriptCanOpenWindowsAutomatically = false
+                                settings.setSupportMultipleWindows(false)
+                                settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    settings.safeBrowsingEnabled = true
+                                }
                                 settings.loadWithOverviewMode = true
                                 settings.useWideViewPort = true
                                 settings.builtInZoomControls = true
                                 settings.displayZoomControls = false
                                 webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(
+                                        view: WebView?,
+                                        request: WebResourceRequest?
+                                    ): Boolean {
+                                        val uri = request?.url ?: return true
+                                        return uri.host.isNullOrBlank() ||
+                                                (uri.scheme != "http" && uri.scheme != "https")
+                                    }
+
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         super.onPageFinished(view, url)
                                         webPageTitle = view?.title ?: ""
@@ -1368,6 +1390,20 @@ fun ManhwaReaderScreen() {
                 }
             }
         }
+    }
+}
+
+private fun normalizeWebUrl(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    val candidate = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        trimmed
+    } else {
+        "https://$trimmed"
+    }
+    val uri = Uri.parse(candidate)
+    return candidate.takeIf {
+        (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()
     }
 }
 

@@ -279,6 +279,11 @@ class ScreenCaptureService : Service() {
         var frame = frameBitmap
         var canvas = frameCanvas
         if (frame == null || canvas == null || frame.width != width || frame.height != height) {
+            // A display rotation or density change can replace the reusable frame.
+            // Release the old native buffer before allocating the new one.
+            if (frame != null && !frame.isRecycled) {
+                frame.recycle()
+            }
             frame = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             canvas = Canvas(frame)
             frameBitmap = frame
@@ -292,6 +297,9 @@ class ScreenCaptureService : Service() {
             val paddedWidth = width + rowPadding / pixelStride
             var staging = stagingBitmap
             if (staging == null || staging.width != paddedWidth || staging.height != height) {
+                if (staging != null && !staging.isRecycled) {
+                    staging.recycle()
+                }
                 staging = Bitmap.createBitmap(paddedWidth, height, Bitmap.Config.ARGB_8888)
                 stagingBitmap = staging
             }
@@ -473,6 +481,8 @@ class ScreenCaptureService : Service() {
         serviceScope.cancel()
         releaseProjection()
         ocrScanner.close()
+        frameBitmap?.let { if (!it.isRecycled) it.recycle() }
+        stagingBitmap?.let { if (!it.isRecycled) it.recycle() }
         frameBitmap = null
         frameCanvas = null
         stagingBitmap = null

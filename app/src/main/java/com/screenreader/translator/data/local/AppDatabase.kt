@@ -45,7 +45,10 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "screen_translator.db"
                 )
-                    .fallbackToDestructiveMigration()
+                    // Never erase user history/cache during a normal upgrade. New
+                    // schema versions must provide an explicit Room Migration;
+                    // destructive fallback is limited to an intentional downgrade.
+                    .fallbackToDestructiveMigrationOnDowngrade()
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

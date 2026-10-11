@@ -106,7 +106,6 @@ class ScreenOcrScanner {
         }
         val inputImage = InputImage.fromBitmap(enhancedBitmap, 0)
         val screenHeight = bitmap.height
-        val screenWidth = bitmap.width
 
         // حاشیه ایمن برای نادیده گرفتن نوار وضعیت بالا و نوار ناوبری پایین (تنها در اسکن زنده صفحه نمایش)
         val topIgnoreMargin = if (filterSystemMargins) (screenHeight * 0.055f).toInt().coerceAtLeast(110) else 0
@@ -228,11 +227,16 @@ class ScreenOcrScanner {
         filterSystemMargins: Boolean = false,
         ocrLanguageMode: Int = com.screenreader.translator.data.local.AppPreferences.OCR_LANG_ENGLISH
     ): List<RecognizedBlock> = coroutineScope {
+        // Keep the step positive even when callers pass malformed values. Without
+        // this guard, sliceHeight == overlap (or a larger overlap) never advances
+        // startY and locks the calling coroutine in an infinite loop.
+        val safeSliceHeight = sliceHeight.coerceAtLeast(256)
+        val safeOverlap = overlap.coerceIn(0, safeSliceHeight - 1)
         val totalHeight = bitmap.height
         val totalWidth = bitmap.width
 
         // اگر ارتفاع تصویر معمولی یا کوتاه باشد، مستقیماً اسکن می‌شود
-        if (totalHeight <= sliceHeight + overlap) {
+        if (totalHeight <= safeSliceHeight + safeOverlap) {
             return@coroutineScope scanBitmap(bitmap, filterSystemMargins, ocrLanguageMode)
         }
 
@@ -240,7 +244,7 @@ class ScreenOcrScanner {
         var startY = 0
 
         while (startY < totalHeight) {
-            val currentSliceHeight = min(sliceHeight, totalHeight - startY)
+            val currentSliceHeight = min(safeSliceHeight, totalHeight - startY)
             if (currentSliceHeight <= 50) break
 
             val sliceBitmap = try {
@@ -266,7 +270,7 @@ class ScreenOcrScanner {
             }
 
             if (startY + currentSliceHeight >= totalHeight) break
-            startY += (sliceHeight - overlap)
+            startY += (safeSliceHeight - safeOverlap)
         }
 
         deduplicateAndMergeBlocks(allBlocks)
